@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /agent
+    schedule:
+      interval: weekly
+    groups:
+      agent-python:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /tools/api
+    schedule:
+      interval: weekly
+    groups:
+      tools-python:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

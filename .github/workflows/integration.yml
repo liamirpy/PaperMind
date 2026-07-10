@@ -1,0 +1,69 @@
+name: Full Stack Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      tools_mode:
+        description: "Run tools in cpu or gpu mode"
+        required: true
+        type: choice
+        options: [cpu, gpu]
+        default: cpu
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    # Register a self-hosted runner with these labels. The full tools stack is
+    # intentionally not started on normal GitHub-hosted PR runners because it
+    # downloads large Docling/GROBID model images and may require an NVIDIA GPU.
+    runs-on: [self-hosted, linux, x64, pdf-analyser]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize repository
+        run: make init
+      - name: Start stack
+        run: |
+          if [ "${{ inputs.tools_mode }}" = "gpu" ]; then
+            make up-gpu
+          else
+            make up-cpu
+          fi
+      - name: Wait for APIs
+        run: |
+          python tools/scripts/wait_for_url.py http://localhost:8090/health/ready --timeout 3600
+          python tools/scripts/wait_for_url.py http://localhost:8100/health/ready --timeout 300
+      - name: Process fixture
+        run: |
+          curl --fail --show-error \
+            -X POST http://localhost:8100/v1/process \
+            -F "file=@tools/tests/fixtures/scientific_sample.pdf;type=application/pdf" \
+            -F "use_llm=false" \
+            -o agent-result.json
+          jq . agent-result.json
+      - name: Validate package
+        run: |
+          DOCUMENT_ID=$(jq -r .document_id agent-result.json)
+          test -f "agent/data/outputs/${DOCUMENT_ID}/canonical_document.json"
+          test -f "agent/data/outputs/${DOCUMENT_ID}/source/original.pdf"
+          jq -e '.quality.status | IN("green", "yellow", "red")' \
+            "agent/data/outputs/${DOCUMENT_ID}/canonical_document.json"
+      - name: Upload canonical package
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-package
+          path: |
+            agent-result.json
+            agent/data/outputs/*.zip
+            agent/data/outputs/*/canonical_document.json
+      - name: Logs on failure
+        if: failure()
+        run: |
+          (cd tools && docker compose -f docker-compose.yml -f docker-compose.gpu.yml logs --tail=500) || true
+          (cd agent && docker compose logs --tail=500) || true
+      - name: Stop stack
+        if: always()
+        run: |
+          make down-gpu || make down || true

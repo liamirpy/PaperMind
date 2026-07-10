@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    name: Agent lint and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - name: Check formatting
+        run: ruff format --check app tests
+      - name: Lint
+        run: ruff check app tests
+      - name: Unit tests
+        run: pytest -q
+      - name: Compile Python
+        run: python -m compileall -q app
+
+  tools:
+    name: Tools lint and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            tools/api/requirements-base.txt
+            tools/api/requirements-dev.txt
+      - name: Install lightweight test dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.txt
+      - name: Check formatting
+        run: ruff format --check .
+      - name: Lint
+        run: ruff check .
+      - name: Unit tests
+        run: pytest -q
+      - name: Compile Python
+        run: python -m compileall -q app
+
+  compose:
+    name: Compose validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create environment files
+        run: |
+          cp tools/.env.example tools/.env
+          cp agent/.env.example agent/.env
+      - name: Validate tools CPU Compose
+        working-directory: tools
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Validate tools GPU Compose
+        working-directory: tools
+        run: docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
+      - name: Validate agent Compose
+        working-directory: agent
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Check shell scripts
+        run: |
+          bash -n tools/scripts/check_gpu.sh
+          bash -n tools/scripts/smoke_test.sh
+          sh -n agent/docker-entrypoint.sh
