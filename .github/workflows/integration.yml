@@ -21,7 +21,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, pdf-analyser]
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Initialize repository
         run: make init
       - name: Start stack
